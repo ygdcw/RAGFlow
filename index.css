@@ -1,0 +1,264 @@
+/* ========== 全局重置 ========== */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #0a0a1a;
+  color: #e0e0e0;
+}
+
+/* ========== 滚动条 ========== */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.15);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.25);
+}
+
+/* ========== Ant Design Layout 强制透明 ========== */
+.ant-layout,
+.ant-layout-content,
+.ant-layout-sider {
+  background: transparent !important;
+}
+
+/* ========== 代码块 ========== */
+pre {
+  border-radius: 8px !important;
+  padding: 14px 16px !important;
+  overflow-x: auto;
+  background: #1e1e1e !important;
+  margin: 8px 0 !important;
+}
+
+pre code {
+  color: #d4d4d4 !important;
+  font-family: 'Fira Code', 'Consolas', 'Monaco', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+code {
+  font-family: 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  background: rgba(255,255,255,0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* ========== Table 深色主题 ========== */
+.ant-table {
+  background: transparent !important;
+}
+
+.ant-table-thead > tr > th {
+  background: rgba(255,255,255,0.06) !important;
+  color: #ccc !important;
+  border-bottom: 1px solid rgba(255,255,255,0.08) !important;
+}
+
+.ant-table-tbody > tr > td {
+  background: transparent !important;
+  color: #e0e0e0 !important;
+  border-bottom: 1px solid rgba(255,255,255,0.04) !important;
+}
+
+.ant-table-tbody > tr:hover > td {
+  background: rgba(255,255,255,0.04) !important;
+}
+
+.ant-table-tbody > tr.ant-table-row-selected > td {
+  background: rgba(102,126,234,0.15) !important;
+}
+
+/* ========== 分页器 ========== */
+.ant-pagination-item {
+  background: rgba(255,255,255,0.06) !important;
+  border-color: rgba(255,255,255,0.1) !important;
+}
+.ant-pagination-item a {
+  color: #ccc !important;
+}
+.ant-pagination-item-active {
+  background: rgba(102,126,234,0.2) !important;
+  border-color: #667eea !important;
+}
+.ant-pagination-prev .ant-pagination-item-link,
+.ant-pagination-next .ant-pagination-item-link {
+  background: rgba(255,255,255,0.06) !important;
+  border-color: rgba(255,255,255,0.1) !important;
+  color: #ccc !important;
+}
+
+/* ========== 空状态 ========== */
+.ant-empty-description {
+  color: #666 !important;
+}
+
+/* ========== Tag ========== */
+.ant-tag {
+  border: none !important;
+}
+
+/* ========== Popconfirm 气泡 ========== */
+.ant-popover-inner {
+  background: rgba(30,30,50,0.95) !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+  backdrop-filter: blur(20px) !important;
+}
+.ant-popover-message,
+.ant-popover-message-title {
+  color: #e0e0e0 !important;
+}
+
+/* ========== Modal 弹窗 ========== */
+.ant-modal-content {
+  background: rgba(30,30,50,0.95) !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+  backdrop-filter: blur(20px) !important;
+}
+.ant-modal-header {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(255,255,255,0.08) !important;
+}
+.ant-modal-title {
+  color: #e0e0e0 !important;
+}
+.ant-modal-close {
+  color: #888 !important;
+}
+.ant-modal .ant-input,
+.ant-modal .ant-input-password {
+  background: rgba(255,255,255,0.06) !important;
+  border-color: rgba(255,255,255,0.1) !important;
+  color: #e0e0e0 !important;
+}
+.ant-modal .ant-input::placeholder {
+  color: #666 !important;
+}
+
+/* ========== 表单 ========== */
+.ant-form-item-label > label {
+  color: #ccc !important;
+}
+
+/* ========== Select 下拉 ========== */
+.ant-select-dropdown {
+  background: rgba(30,30,50,0.95) !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+  backdrop-filter: blur(20px) !important;
+}
+.ant-select-item {
+  color: #e0e0e0 !important;
+}
+.ant-select-item-option-selected {
+  background: rgba(102,126,234,0.2) !important;
+}
+
+/* ========== Breadcrumb ========== */
+.ant-breadcrumb-separator {
+  color: #666 !important;
+}
+
+/* ========== Upload 拖拽区 ========== */
+.ant-upload-drag {
+  background: transparent !important;
+  border-color: rgba(255,255,255,0.1) !important;
+}
+.ant-upload-drag:hover {
+  border-color: #667eea !important;
+}
+
+/* ========== Statistic 统计 ========== */
+.ant-statistic-title {
+  color: rgba(255,255,255,0.6) !important;
+}
+.ant-statistic-content {
+  color: #e0e0e0 !important;
+}
+.ant-statistic-content-prefix {
+  color: #667eea !important;
+}
+
+/* ========== Placeholder 颜色 ========== */
+.ant-input::placeholder,
+.ant-input-affix-wrapper input::placeholder,
+textarea.ant-input::placeholder,
+.ant-input-textarea textarea::placeholder {
+  color: rgba(255,255,255,0.45) !important;
+  opacity: 1 !important;
+}
+
+/* ========== 动画 ========== */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-in {
+  animation: fadeIn 0.3s ease;
+}
+
+/* ========== 打字机光标 ========== */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.typing-cursor {
+  animation: blink 0.8s infinite;
+  font-weight: bold;
+}
+
+/* ========== 毛玻璃 hover 上浮 ========== */
+.glass-card {
+  transition: all 0.3s ease;
+  cursor: default;
+}
+.glass-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 30px rgba(102,126,234,0.2) !important;
+  background: rgba(255,255,255,0.1) !important;
+  border-color: rgba(255,255,255,0.2) !important;
+}
+
+.glass-card-main {
+  transition: all 0.3s ease;
+}
+.glass-card-main:hover {
+  box-shadow: 0 4px 20px rgba(102,126,234,0.15) !important;
+}
+
+.login-card {
+  transition: all 0.4s ease;
+}
+.login-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 30px 80px rgba(102,126,234,0.3) !important;
+  background: rgba(255,255,255,0.15) !important;
+}
+
+.msg-bubble {
+  transition: all 0.25s ease;
+}
+.msg-bubble:hover {
+  transform: translateY(-2px);
+}
+.msg-bubble-ai:hover {
+  background: rgba(255,255,255,0.12) !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3) !important;
+}
+.msg-bubble-user:hover {
+  box-shadow: 0 4px 16px rgba(102,126,234,0.4) !important;
+}
