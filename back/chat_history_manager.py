@@ -68,12 +68,13 @@ class ChatHistoryManager:
         except Exception as e:
             print(f"保存会话索引失败: {str(e)}")
 
-    def create_session(self, session_id: str = None) -> str:
+    def create_session(self, session_id: str = None, user_id: str = None) -> str:
         """
         创建新会话
         
         参数：
             session_id (str, optional): 会话ID，不提供则自动生成
+            user_id (str, optional): 用户ID，用于会话隔离
             
         返回：
             str: 会话ID
@@ -85,6 +86,7 @@ class ChatHistoryManager:
             - 如果提供session_id，检查是否已存在
             - 如果未提供，生成UUID作为会话ID
             - 创建会话目录用于存储消息文件
+            - 记录用户ID用于会话隔离
         """
         if session_id is None:
             session_id = str(uuid.uuid4())
@@ -92,16 +94,15 @@ class ChatHistoryManager:
         if session_id in self.session_index:
             raise ValueError(f"会话 {session_id} 已存在")
         
-        # 创建会话目录
         session_dir = os.path.join(self.persist_directory, session_id)
         os.makedirs(session_dir, exist_ok=True)
         
-        # 添加到索引
         now = datetime.now().isoformat()
         self.session_index[session_id] = {
             "created_at": now,
             "updated_at": now,
             "message_count": 0,
+            "user_id": user_id,
         }
         
         self._save_session_index()
@@ -226,13 +227,14 @@ class ChatHistoryManager:
             **self.session_index[session_id],
         }
 
-    def list_sessions(self, limit: int = None, order_by: str = "updated_at") -> List[dict]:
+    def list_sessions(self, limit: int = None, order_by: str = "updated_at", user_id: str = None) -> List[dict]:
         """
         获取会话列表
         
         参数：
             limit (int, optional): 返回会话数量限制
             order_by (str): 排序字段，支持"created_at"、"updated_at"、"message_count"
+            user_id (str, optional): 用户ID，用于过滤用户专属会话
             
         返回：
             List[dict]: 会话信息列表
@@ -241,26 +243,41 @@ class ChatHistoryManager:
         数据格式：会话信息字典列表，按指定字段排序
         
         设计思路：
+            - 根据user_id参数过滤用户专属会话
             - 根据order_by参数选择排序字段
             - 按降序排列（最新的在前面）
             - 应用limit限制返回数量
         """
         sessions = []
         for session_id, info in self.session_index.items():
+            if user_id is not None and info.get("user_id") != user_id:
+                continue
             sessions.append({
                 "session_id": session_id,
                 **info,
             })
         
-        # 排序
         if order_by in ["created_at", "updated_at", "message_count"]:
             sessions.sort(key=lambda x: x.get(order_by, ""), reverse=True)
         
-        # 限制数量
         if limit is not None:
             sessions = sessions[:limit]
         
         return sessions
+
+    def get_session_user_id(self, session_id: str) -> str:
+        """
+        获取会话所属用户ID
+        
+        参数：
+            session_id (str): 会话ID
+            
+        返回：
+            str: 用户ID，如果会话不存在或未设置用户ID返回None
+        """
+        if session_id not in self.session_index:
+            return None
+        return self.session_index[session_id].get("user_id")
 
     def delete_session(self, session_id: str):
         """

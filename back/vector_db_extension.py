@@ -35,26 +35,40 @@ class VectorDBExtension:
         # 确保持久化目录存在
         os.makedirs(self.persist_directory, exist_ok=True)
         
-        # 加载已配置的集合
+        # 加载集合
         self._load_collections()
 
     def _load_collections(self):
         """
-        加载配置中定义的所有集合
+        加载配置中定义的所有集合以及持久化目录中已存在的集合
         
         遍历VECTOR_DB_COLLECTIONS配置，创建或加载对应的Chroma集合
+        同时扫描持久化目录，加载所有已存在的Chroma集合（包括动态创建的）
+        
+        关键改进：使用初始化标记文件，只有首次运行时才创建预定义集合，
+        用户删除的集合不会在重启时重新创建，确保删除操作的持久性。
         """
-        for category, collection_name in config.VECTOR_DB_COLLECTIONS.items():
-            try:
-                self._get_or_create_collection(collection_name)
-                # 设置集合元数据
-                self.collection_metadata[collection_name] = {
-                    "category": category,
-                    "description": f"{category} category documents",
-                    "document_count": 0,
-                }
-            except Exception as e:
-                print(f"加载集合 {collection_name} 失败: {str(e)}")
+        init_flag_file = os.path.join(self.persist_directory, ".initialized")
+        
+        if os.path.exists(init_flag_file):
+            pass
+        else:
+            for category, collection_name in config.VECTOR_DB_COLLECTIONS.items():
+                try:
+                    self._get_or_create_collection(collection_name)
+                    self.collection_metadata[collection_name] = {
+                        "category": category,
+                        "description": f"{category} category documents",
+                        "document_count": 0,
+                    }
+                except Exception as e:
+                    print(f"加载集合 {collection_name} 失败: {str(e)}")
+            
+            with open(init_flag_file, "w") as f:
+                f.write("initialized")
+        
+        if not config.VECTOR_DB_USE_REMOTE:
+            self._load_existing_collections_from_disk()
 
     def _get_or_create_collection(self, collection_name: str) -> Chroma:
         """
@@ -101,6 +115,33 @@ class VectorDBExtension:
             persist_directory=self.persist_directory,
         )
 
+    def _load_existing_collections_from_disk(self):
+        """
+        从持久化目录加载所有已存在的Chroma集合
+        
+        扫描VECTOR_DB_PERSIST_DIR目录，找出所有已存在的集合目录
+        并加载那些不在self.collections中的集合
+        """
+        if not os.path.exists(self.persist_directory):
+            return
+        
+        for entry in os.listdir(self.persist_directory):
+            entry_path = os.path.join(self.persist_directory, entry)
+            if os.path.isdir(entry_path):
+                if entry not in self.collections:
+                    try:
+                        db = self._create_local_collection(entry)
+                        self.collections[entry] = db
+                        
+                        if entry not in self.collection_metadata:
+                            self.collection_metadata[entry] = {
+                                "category": entry,
+                                "description": f"Collection {entry}",
+                                "document_count": len(db.get()["ids"]),
+                            }
+                    except Exception as e:
+                        print(f"加载已存在的集合 {entry} 失败: {str(e)}")
+
     def _create_remote_collection(self, collection_name: str) -> Chroma:
         """
         创建远程Chroma集合连接
@@ -138,14 +179,15 @@ class VectorDBExtension:
         if not documents:
             return []
         
-        # 获取实际的集合名称（支持类别名称映射）
         actual_collection_name = self._resolve_collection_name(collection_name)
         
+        if actual_collection_name not in self.collections:
+            raise ValueError(f"集合 {collection_name} 不存在，请先创建知识库")
+        
         try:
-            db = self._get_or_create_collection(actual_collection_name)
+            db = self.collections[actual_collection_name]
             doc_ids = db.add_documents(documents)
             
-            # 更新集合元数据中的文档计数
             if actual_collection_name in self.collection_metadata:
                 self.collection_metadata[actual_collection_name]["document_count"] = len(db.get()["ids"])
             
@@ -264,8 +306,10 @@ class VectorDBExtension:
         数据格式：包含集合名称、类别、文档数量等信息
         """
         if collection_name is None:
-            # 返回所有集合信息
+            # 返回所有集合信息（包括配置文件中预定义的和动态创建的）
             info = {}
+            
+            # 先处理配置文件中预定义的集合
             for category, name in config.VECTOR_DB_COLLECTIONS.items():
                 if name in self.collections:
                     db = self.collections[name]
@@ -274,6 +318,18 @@ class VectorDBExtension:
                         "document_count": len(db.get()["ids"]),
                         **(self.collection_metadata.get(name, {})),
                     }
+            
+            # 再处理动态创建的集合（不在配置文件中但在self.collections中）
+            for name in self.collections:
+                if name not in info:
+                    db = self.collections[name]
+                    metadata = self.collection_metadata.get(name, {})
+                    info[name] = {
+                        "category": metadata.get("category", name),
+                        "document_count": len(db.get()["ids"]),
+                        **metadata,
+                    }
+            
             return info
         
         actual_collection_name = self._resolve_collection_name(collection_name)

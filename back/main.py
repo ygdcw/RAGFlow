@@ -4,7 +4,8 @@ import json
 import asyncio
 import jwt
 import time
-from fastapi import FastAPI, HTTPException, Depends, File, UploadFile
+import uuid
+from fastapi import FastAPI, HTTPException, Depends, File, UploadFile, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -205,7 +206,7 @@ async def get_conversation_list(user: Dict[str, Any] = Depends(get_current_user)
     """
     获取对话列表接口
     """
-    sessions = chat_history_manager.list_sessions(limit=20)
+    sessions = chat_history_manager.list_sessions(limit=20, user_id=user["id"])
     conversations = []
     for session in sessions:
         messages = chat_history_manager.get_messages(session["session_id"])
@@ -226,7 +227,7 @@ async def create_conversation(user: Dict[str, Any] = Depends(get_current_user)):
     """
     创建新对话接口
     """
-    session_id = chat_history_manager.create_session()
+    session_id = chat_history_manager.create_session(user_id=user["id"])
     return success_response({
         "id": session_id,
         "title": "新对话",
@@ -240,6 +241,10 @@ async def delete_conversation(conversation_id: str, user: Dict[str, Any] = Depen
     删除对话接口
     """
     try:
+        session_user_id = chat_history_manager.get_session_user_id(conversation_id)
+        if session_user_id is not None and session_user_id != user["id"]:
+            raise HTTPException(status_code=403, detail="无权删除此对话")
+        
         chat_history_manager.delete_session(conversation_id)
         return success_response(message="对话已删除")
     except ValueError as e:
@@ -251,15 +256,20 @@ async def get_conversation_messages(conversation_id: str, user: Dict[str, Any] =
     """
     获取对话消息接口
     """
+    session_user_id = chat_history_manager.get_session_user_id(conversation_id)
+    if session_user_id is not None and session_user_id != user["id"]:
+        raise HTTPException(status_code=403, detail="无权访问此对话")
+    
     messages = chat_history_manager.get_messages(conversation_id)
     formatted_messages = []
     for msg in messages:
         formatted_messages.append({
-            "id": msg["message_id"],
+            "id": msg.get("id", msg.get("message_id", "")),
             "conversation_id": conversation_id,
             "role": msg["role"],
             "content": msg["content"],
-            "created_at": msg["created_at"],
+            "created_at": msg.get("created_at", msg.get("timestamp", "")),
+            "sources": msg.get("source_documents", []),
         })
     return success_response({"items": formatted_messages, "total": len(formatted_messages), "page": 1, "page_size": 100})
 
@@ -336,7 +346,7 @@ async def get_documents(kb_id: str, user: Dict[str, Any] = Depends(get_current_u
 @app.post("/api/v1/documents/upload")
 async def upload_document(
     file: UploadFile = File(...),
-    knowledge_base_id: str = "default",
+    knowledge_base_id: str = Form(...),
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
@@ -346,14 +356,12 @@ async def upload_document(
     管理员可以上传到任何知识库
     """
     try:
-        # 保存上传的文件
         file_path = os.path.join(os.path.dirname(__file__), "uploads", file.filename)
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         
         with open(file_path, "wb") as f:
             f.write(await file.read())
         
-        # 处理文档
         documents = document_processor.load_and_split([file_path])
         
         if user["role"] == "admin":
@@ -361,7 +369,6 @@ async def upload_document(
         else:
             doc_ids = vector_db_service.add_documents(documents)
         
-        # 清理临时文件
         os.remove(file_path)
         
         return success_response({
@@ -371,6 +378,8 @@ async def upload_document(
             "status": "ready",
             "created_at": datetime.now().isoformat(),
         }, message="文档上传成功")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -381,10 +390,63 @@ async def delete_document(doc_id: str, user: Dict[str, Any] = Depends(get_curren
     删除文档接口（管理员权限）
     """
     try:
-        vector_db_service.clear_all_documents()
+        vector_db_service.delete_documents([doc_id])
         return success_response(message="文档已删除")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+applied_knowledge_base = None
+
+
+@app.post("/api/v1/knowledge-bases/{kb_id}/apply")
+async def apply_knowledge_base(kb_id: str, user: Dict[str, Any] = Depends(get_current_admin_user)):
+    """
+    应用知识库接口（管理员权限）
+    将指定知识库设置为当前AI使用的知识库
+    """
+    global applied_knowledge_base
+    
+    collections = vector_db_service.get_collection_info()
+    if kb_id not in collections:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+    
+    applied_knowledge_base = kb_id
+    return success_response({
+        "id": kb_id,
+        "name": collections[kb_id].get("category", kb_id),
+    }, message=f"知识库 {collections[kb_id].get('category', kb_id)} 已应用")
+
+
+@app.delete("/api/v1/knowledge-bases/apply")
+async def unapply_knowledge_base(user: Dict[str, Any] = Depends(get_current_admin_user)):
+    """
+    取消应用知识库接口（管理员权限）
+    """
+    global applied_knowledge_base
+    applied_knowledge_base = None
+    return success_response(message="已解除知识库应用")
+
+
+@app.get("/api/v1/knowledge-bases/applied")
+async def get_applied_knowledge_base(user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    获取当前应用的知识库接口
+    """
+    global applied_knowledge_base
+    
+    if applied_knowledge_base is None:
+        return success_response({"id": None, "name": None})
+    
+    collections = vector_db_service.get_collection_info()
+    if applied_knowledge_base in collections:
+        return success_response({
+            "id": applied_knowledge_base,
+            "name": collections[applied_knowledge_base].get("category", applied_knowledge_base),
+        })
+    
+    applied_knowledge_base = None
+    return success_response({"id": None, "name": None})
 
 
 # ========== 管理后台API ==========
@@ -469,6 +531,26 @@ async def toggle_user_status(user_id: str, user: Dict[str, Any] = Depends(get_cu
     raise HTTPException(status_code=404, detail="用户不存在")
 
 
+@app.post("/api/v1/admin/knowledge-bases")
+async def admin_create_knowledge_base(name: str, user: Dict[str, Any] = Depends(get_current_admin_user)):
+    """
+    创建知识库接口（管理员权限）
+    """
+    try:
+        kb_id = str(uuid.uuid4()).replace("-", "")[:20]
+        vector_db_service.create_new_collection(kb_id, category=name)
+        return success_response({
+            "id": kb_id,
+            "name": name,
+            "doc_count": 0,
+            "owner": "admin",
+            "created_at": datetime.now().isoformat(),
+            "status": "empty",
+        }, message="知识库创建成功")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get("/api/v1/admin/knowledge-bases")
 async def admin_get_knowledge_bases(user: Dict[str, Any] = Depends(get_current_admin_user)):
     """
@@ -486,6 +568,18 @@ async def admin_get_knowledge_bases(user: Dict[str, Any] = Depends(get_current_a
             "status": "active" if info.get("document_count", 0) > 0 else "empty",
         })
     return success_response(kb_list)
+
+
+@app.delete("/api/v1/admin/knowledge-bases/{kb_id}")
+async def admin_delete_knowledge_base(kb_id: str, user: Dict[str, Any] = Depends(get_current_admin_user)):
+    """
+    删除知识库接口（管理员权限）
+    """
+    try:
+        vector_db_service.delete_collection(kb_id)
+        return success_response(message="知识库已删除")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/v1/admin/documents")
@@ -581,7 +675,11 @@ async def chat(query: QueryRequest, user: Dict[str, Any] = Depends(get_current_u
         raise HTTPException(status_code=400, detail="问题不能为空")
     
     try:
-        result = rag_chain.query_with_sources(query.question)
+        if applied_knowledge_base:
+            retriever = vector_db_service.get_retriever_for_collection(applied_knowledge_base)
+            result = rag_chain.query_with_sources(query.question, retriever)
+        else:
+            result = rag_chain.query_with_sources(query.question)
         return success_response({
             "answer": result["answer"],
             "sources": result["formatted_sources"],
@@ -604,7 +702,11 @@ async def chat_with_session(request: SessionQueryRequest, user: Dict[str, Any] =
         raise HTTPException(status_code=400, detail="问题不能为空")
     
     try:
-        result = rag_chain.query_with_session(request.question, request.conversation_id)
+        if applied_knowledge_base:
+            retriever = vector_db_service.get_retriever_for_collection(applied_knowledge_base)
+            result = rag_chain.query_with_session(request.question, request.conversation_id, retriever, user["id"])
+        else:
+            result = rag_chain.query_with_session(request.question, request.conversation_id, None, user["id"])
         return success_response({
             "conversation_id": result["session_id"],
             "answer": result["answer"],
@@ -626,7 +728,11 @@ async def chat_send(request: SessionQueryRequest, user: Dict[str, Any] = Depends
     
     async def generate():
         try:
-            result = rag_chain.query_with_session(request.question, request.conversation_id)
+            if applied_knowledge_base:
+                retriever = vector_db_service.get_retriever_for_collection(applied_knowledge_base)
+                result = rag_chain.query_with_session(request.question, request.conversation_id, retriever, user["id"])
+            else:
+                result = rag_chain.query_with_session(request.question, request.conversation_id, None, user["id"])
             
             answer = result["answer"]
             sources = result["formatted_sources"]

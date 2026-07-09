@@ -1,17 +1,19 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Layout, Menu, Card, Table, Button, Modal, Form, Input, Select,
-  Statistic, Row, Col, Tag, Space, message, Typography, Popconfirm
+  Statistic, Row, Col, Tag, Space, message, Typography, Popconfirm, Spin
 } from 'antd'
 import {
   UserOutlined, DashboardOutlined, FileTextOutlined,
   LogoutOutlined, PlusOutlined, DeleteOutlined,
   StopOutlined, CheckCircleOutlined, BookOutlined,
   ReloadOutlined, EditOutlined, ToolOutlined, UploadOutlined,
+  RocketOutlined, FolderOpenOutlined, LoadingOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '../stores/useAuthStore'
 import { adminApi } from '../api/admin'
+import request from '../api/request'
 import ParticleBackground from '../components/common/ParticleBackground'
 
 const { Sider, Content } = Layout
@@ -41,12 +43,36 @@ export default function AdminPage() {
   const [editingDoc, setEditingDoc] = useState<AdminDocument | null>(null)
   const [tagForm] = Form.useForm()
 
+  const [appliedKB, setAppliedKB] = useState<string | null>(() => {
+    const saved = localStorage.getItem('appliedKB')
+    return saved ? JSON.parse(saved) : null
+  })
+  const [applyingKB, setApplyingKB] = useState<string | null>(null)
+  const [importModalOpen, setImportModalOpen] = useState(false)
+  const [selectedKBForImport, setSelectedKBForImport] = useState<string | null>(null)
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [importLoading, setImportLoading] = useState(false)
+  const [, setImportProgress] = useState(0)
+  const [manageModalOpen, setManageModalOpen] = useState(false)
+  const [selectedKBForManage, setSelectedKBForManage] = useState<string | null>(null)
+  const [kbDocuments, setKbDocuments] = useState<AdminDocument[]>([])
+  const [manageLoading, setManageLoading] = useState(false)
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   const [hoveredCard, setHoveredCard] = useState<string | null>(null)
   const [hoveredMain, setHoveredMain] = useState(false)
 
   useEffect(() => {
     loadData()
     adminApi.getAllKnowledgeBases().then(setKbList).catch(() => {})
+    
+    request.get('/knowledge-bases/applied').then((res: any) => {
+      if (res.id) {
+        setAppliedKB(res.id)
+        localStorage.setItem('appliedKB', JSON.stringify(res.id))
+      }
+    }).catch(() => {})
   }, [activeMenu])
 
   const loadData = async () => {
@@ -146,6 +172,101 @@ export default function AdminPage() {
         loadData()
       },
     })
+  }
+
+  const handleApplyKB = async (kbId: string) => {
+    if (applyingKB === kbId) return
+    
+    setApplyingKB(kbId)
+    try {
+      if (appliedKB === kbId) {
+        await request.delete('/knowledge-bases/apply')
+        setAppliedKB(null)
+        localStorage.removeItem('appliedKB')
+        message.success('已解除知识库应用')
+      } else {
+        await request.post(`/knowledge-bases/${kbId}/apply`)
+        setAppliedKB(kbId)
+        localStorage.setItem('appliedKB', JSON.stringify(kbId))
+        message.success('知识库应用成功')
+      }
+    } catch (err: any) {
+      message.error(err.message)
+    } finally {
+      setApplyingKB(null)
+      loadData()
+    }
+  }
+
+  const handleOpenImportModal = (kbId: string) => {
+    setSelectedKBForImport(kbId)
+    setImportFile(null)
+    setImportProgress(0)
+    setImportModalOpen(true)
+  }
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      const ext = file.name.split('.').pop()?.toLowerCase()
+      if (!['txt', 'docx', 'pdf', 'pptx'].includes(ext || '')) {
+        message.error('仅支持 .txt、.docx、.pdf、.pptx 格式')
+        return
+      }
+      setImportFile(file)
+    }
+  }
+
+  const handleImport = async () => {
+    if (!importFile || !selectedKBForImport) return
+    
+    setImportLoading(true)
+    setImportProgress(0)
+    
+    const formData = new FormData()
+    formData.append('file', importFile)
+    formData.append('knowledge_base_id', selectedKBForImport)
+    
+    try {
+      await adminApi.uploadDocument(formData)
+      message.success('文件导入成功')
+      setImportModalOpen(false)
+      setImportFile(null)
+      loadData()
+    } catch (err: any) {
+      message.error(err.message)
+    } finally {
+      setImportLoading(false)
+    }
+  }
+
+  const handleOpenManageModal = async (kbId: string) => {
+    setSelectedKBForManage(kbId)
+    setManageLoading(true)
+    setManageModalOpen(true)
+    
+    try {
+      const docs = await adminApi.getAllDocuments()
+      setKbDocuments(docs.filter(d => d.knowledge_base === kbId))
+    } catch (err: any) {
+      message.error(err.message)
+      setKbDocuments([])
+    } finally {
+      setManageLoading(false)
+    }
+  }
+
+  const handleDeleteDocFromKB = async (docId: string) => {
+    if (!selectedKBForManage) return
+    
+    try {
+      await adminApi.deleteDocument(docId)
+      message.success('文档已删除')
+      setKbDocuments(prev => prev.filter(d => d.id !== docId))
+      loadData()
+    } catch (err: any) {
+      message.error(err.message)
+    }
   }
 
   const handleReparse = async (docId: string) => {
@@ -254,8 +375,8 @@ export default function AdminPage() {
           { title: '用户名', dataIndex: 'username' },
           { title: '角色', dataIndex: 'role', render: (r: string) => <Tag color={r === 'admin' ? 'red' : 'blue'}>{r === 'admin' ? '管理员' : '普通用户'}</Tag> },
           { title: '状态', dataIndex: 'status', render: (s: string) => <Tag color={s === 'active' ? 'green' : 'gray'}>{s === 'active' ? '正常' : '已禁用'}</Tag> },
-          { title: '创建时间', dataIndex: 'created_at' },
-          { title: '最后登录', dataIndex: 'last_login' },
+          { title: '创建时间', dataIndex: 'created_at', render: (t: string) => t?.slice(0, 10) },
+          { title: '最后登录', dataIndex: 'last_login', render: (t: string) => t?.slice(0, 10) },
           { title: '操作', render: (_: any, r: AdminUser) => (
               <Space>
                 <Button size="small" icon={r.status === 'active' ? <StopOutlined /> : <CheckCircleOutlined />} onClick={() => handleToggleUser(r.id)}>
@@ -294,11 +415,36 @@ export default function AdminPage() {
           { title: '文档数量', dataIndex: 'doc_count' },
           { title: '创建者', dataIndex: 'owner' },
           { title: '状态', dataIndex: 'status', render: (s: string) => <Tag color={s === 'active' ? 'green' : 'orange'}>{s === 'active' ? '正常' : '空知识库'}</Tag> },
-          { title: '创建时间', dataIndex: 'created_at' },
+          { title: '创建时间', dataIndex: 'created_at', render: (t: string) => t?.slice(0, 10) },
           { title: '操作', render: (_: any, r: AdminKnowledgeBase) => (
-              <Popconfirm title="确定删除此知识库？" onConfirm={() => handleDeleteKB(r.id)} okButtonProps={{ danger: true }}>
-                <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
-              </Popconfirm>
+              <Space>
+                <Button
+                  size="small"
+                  type={appliedKB === r.id ? 'primary' : 'default'}
+                  icon={applyingKB === r.id ? <LoadingOutlined spin /> : <RocketOutlined />}
+                  onClick={() => handleApplyKB(r.id)}
+                  loading={applyingKB === r.id}
+                >
+                  {appliedKB === r.id ? '已应用' : '应用'}
+                </Button>
+                <Button
+                  size="small"
+                  icon={<UploadOutlined />}
+                  onClick={() => handleOpenImportModal(r.id)}
+                >
+                  导入
+                </Button>
+                <Button
+                  size="small"
+                  icon={<FolderOpenOutlined />}
+                  onClick={() => handleOpenManageModal(r.id)}
+                >
+                  管理
+                </Button>
+                <Popconfirm title="确定删除此知识库？" onConfirm={() => handleDeleteKB(r.id)} okButtonProps={{ danger: true }}>
+                  <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
+                </Popconfirm>
+              </Space>
             ),
           },
         ]}
@@ -312,6 +458,106 @@ export default function AdminPage() {
             <Input placeholder="请输入知识库名称" />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title="导入文件"
+        open={importModalOpen}
+        onCancel={() => { setImportModalOpen(false); setImportFile(null) }}
+        onOk={handleImport}
+        confirmLoading={importLoading}
+      >
+        <div style={{ padding: 8 }}>
+          <div style={{ marginBottom: 16 }}>
+            <p style={{ color: '#ccc', marginBottom: 8 }}>选择要导入的文件（支持 .txt、.docx、.pdf、.pptx 格式）</p>
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept=".txt,.docx,.pdf,.pptx"
+              onChange={handleFileSelect}
+              style={{ color: '#e0e0e0' }}
+            />
+          </div>
+          {importFile && (
+            <div style={{ padding: 12, background: 'rgba(255,255,255,0.05)', borderRadius: 8 }}>
+              <p style={{ color: '#e0e0e0' }}>已选择文件：{importFile.name}</p>
+              <p style={{ color: '#888', fontSize: 12 }}>文件大小：{(importFile.size / 1024).toFixed(2)} KB</p>
+            </div>
+          )}
+          {importLoading && (
+            <div style={{ marginTop: 16, textAlign: 'center' }}>
+              <Spin tip="正在导入..." />
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      <Modal
+        title="文档管理"
+        open={manageModalOpen}
+        onCancel={() => setManageModalOpen(false)}
+        footer={null}
+        width={600}
+      >
+        <Spin spinning={manageLoading}>
+          {kbDocuments.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 40, color: '#888' }}>
+              <FileTextOutlined style={{ fontSize: 48, marginBottom: 12 }} />
+              <p>该知识库暂无文档</p>
+            </div>
+          ) : (
+            <Table
+              dataSource={kbDocuments}
+              rowKey="id"
+              pagination={false}
+              columns={[
+                {
+                  title: '文件名',
+                  dataIndex: 'filename',
+                  render: (n: string) => (
+                    <Space>
+                      <FileTextOutlined style={{ color: '#667eea' }} />
+                      <span style={{ color: '#e0e0e0' }}>{n}</span>
+                    </Space>
+                  ),
+                },
+                {
+                  title: '大小',
+                  dataIndex: 'size',
+                },
+                {
+                  title: '状态',
+                  dataIndex: 'status',
+                  render: (s: string) => {
+                    const map: Record<string, { color: string; text: string }> = {
+                      processing: { color: 'processing', text: '解析中' },
+                      ready: { color: 'success', text: '就绪' },
+                      error: { color: 'error', text: '失败' },
+                    }
+                    return <Tag color={map[s]?.color}>{map[s]?.text || s}</Tag>
+                  },
+                },
+                {
+                  title: '上传时间',
+                  dataIndex: 'created_at',
+                  render: (t: string) => t?.slice(0, 10),
+                },
+                {
+                  title: '操作',
+                  render: (_: any, r: AdminDocument) => (
+                    <Popconfirm
+                      title="确定删除此文档？"
+                      onConfirm={() => handleDeleteDocFromKB(r.id)}
+                      okButtonProps={{ danger: true }}
+                    >
+                      <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
+                    </Popconfirm>
+                  ),
+                },
+              ]}
+            />
+          )}
+        </Spin>
       </Modal>
     </div>
   )
@@ -343,7 +589,7 @@ export default function AdminPage() {
               <Space size={4}>{tags.map(t => <Tag key={t} color="blue">{t}</Tag>)}</Space>
             ),
           },
-          { title: '上传时间', dataIndex: 'created_at' },
+          { title: '上传时间', dataIndex: 'created_at', render: (t: string) => t?.slice(0, 10) },
           { title: '操作', render: (_: any, r: AdminDocument) => (
               <Space>
                 <Button size="small" icon={<EditOutlined />} onClick={() => handleEditTags(r)}>标签</Button>
@@ -401,7 +647,7 @@ export default function AdminPage() {
       <Title level={4} style={{ marginBottom: 24, color: '#e0e0e0' }}>操作日志</Title>
       <Table dataSource={logs} rowKey="id" loading={loading}
         columns={[
-          { title: '时间', dataIndex: 'created_at' },
+          { title: '时间', dataIndex: 'created_at', render: (t: string) => t?.slice(0, 10) },
           { title: '用户', dataIndex: 'user' },
           { title: '操作', dataIndex: 'action', render: (a: string) => <Tag>{a}</Tag> },
           { title: '详情', dataIndex: 'detail' },

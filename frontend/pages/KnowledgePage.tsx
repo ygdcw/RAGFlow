@@ -236,7 +236,7 @@ export default function KnowledgePage() {
               return <Tag color={map[status]?.color}>{map[status]?.text || status}</Tag>
             },
           },
-          { title: '上传时间', dataIndex: 'created_at', key: 'created_at' },
+          { title: '上传时间', dataIndex: 'created_at', key: 'created_at', render: (t: string) => t?.slice(0, 10) },
           {
             title: '操作', key: 'action',
             render: (_: any, record: Document) => isAdmin && (

@@ -41,12 +41,13 @@ class RAGChain:
             verbose=True,
         )
 
-    def query(self, question):
+    def query(self, question, retriever=None):
         """
         执行RAG查询
         
         参数：
             question (str): 用户问题
+            retriever (object, optional): 自定义检索器，不提供则使用默认检索器
         
         返回：
             dict: 查询结果，包含answer和source_documents
@@ -61,17 +62,28 @@ class RAGChain:
             }
         
         try:
-            result = self.qa_chain.invoke({"question": question})
+            if retriever:
+                chain = ConversationalRetrievalChain.from_llm(
+                    llm=llm_service.llm,
+                    memory=self.memory,
+                    retriever=retriever,
+                    return_source_documents=True,
+                    verbose=True,
+                )
+                result = chain.invoke({"question": question})
+            else:
+                result = self.qa_chain.invoke({"question": question})
             return result
         except Exception as e:
             raise RuntimeError(f"RAG查询失败: {str(e)}") from e
 
-    def query_with_sources(self, question):
+    def query_with_sources(self, question, retriever=None):
         """
         执行RAG查询并返回来源信息
         
         参数：
             question (str): 用户问题
+            retriever (object, optional): 自定义检索器，不提供则使用默认检索器
         
         返回：
             dict: 查询结果，包含answer、source_documents和formatted_sources
@@ -79,14 +91,22 @@ class RAGChain:
         【人D协作接口】：检索模块调用此方法执行查询并获取格式化的来源信息
         数据格式：输出为包含answer和formatted_sources的字典
         """
-        result = self.query(question)
+        result = self.query(question, retriever)
         
         formatted_sources = []
         if "source_documents" in result and result["source_documents"]:
             for doc in result["source_documents"]:
+                metadata = doc.metadata if hasattr(doc, "metadata") else {}
+                filename = metadata.get("source", metadata.get("filename", "未知文档"))
+                if isinstance(filename, str) and "\\" in filename:
+                    filename = filename.split("\\")[-1]
+                elif isinstance(filename, str) and "/" in filename:
+                    filename = filename.split("/")[-1]
+                
                 formatted_sources.append({
                     "content": doc.page_content[:100] + "..." if len(doc.page_content) > 100 else doc.page_content,
-                    "metadata": doc.metadata if hasattr(doc, "metadata") else {}
+                    "metadata": metadata,
+                    "filename": filename,
                 })
         
         return {
@@ -115,13 +135,37 @@ class RAGChain:
         """
         return self.memory.chat_memory.messages
 
-    def query_with_session(self, question, session_id=None):
+    def _load_chat_history(self, session_id):
+        """
+        加载对话历史到内存
+        
+        参数：
+            session_id (str): 会话ID
+        
+        从持久化存储加载对话历史，并设置到内存中
+        """
+        from langchain_classic.schema import HumanMessage, AIMessage
+        
+        self.memory.clear()
+        
+        messages = chat_history_manager.get_messages(session_id)
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role == "user":
+                self.memory.chat_memory.add_user_message(content)
+            elif role == "assistant":
+                self.memory.chat_memory.add_ai_message(content)
+
+    def query_with_session(self, question, session_id=None, retriever=None, user_id=None):
         """
         【人C扩展方法】带会话管理的RAG查询
         
         参数：
             question (str): 用户问题
             session_id (str, optional): 会话ID，不提供则创建新会话
+            retriever (object, optional): 自定义检索器，不提供则使用默认检索器
+            user_id (str, optional): 用户ID，用于会话隔离
             
         返回：
             dict: 查询结果，包含answer、source_documents、session_id和formatted_sources
@@ -132,16 +176,15 @@ class RAGChain:
             - 执行查询并保存对话消息到持久化存储
             - 返回包含会话信息的完整结果
         """
-        # 如果提供了session_id，确保会话存在
         if session_id:
             if session_id not in chat_history_manager.session_index:
-                chat_history_manager.create_session(session_id)
+                chat_history_manager.create_session(session_id, user_id)
         else:
-            # 创建新会话
-            session_id = chat_history_manager.create_session()
+            session_id = chat_history_manager.create_session(user_id=user_id)
         
-        # 执行查询
-        result = self.query_with_sources(question)
+        self._load_chat_history(session_id)
+        
+        result = self.query_with_sources(question, retriever)
         
         # 保存用户消息和AI响应到对话历史
         chat_history_manager.add_message(

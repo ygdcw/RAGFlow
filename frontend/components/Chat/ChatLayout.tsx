@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Modal, Typography, Spin, Empty, message } from 'antd'
-import { PlusOutlined, DeleteOutlined, MessageOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SettingOutlined } from '@ant-design/icons'
+import { PlusOutlined, DeleteOutlined, MessageOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SettingOutlined, LogoutOutlined } from '@ant-design/icons'
 import { useChatStore } from '../../stores/useChatStore'
 import { useAuthStore } from '../../stores/useAuthStore'
 import ParticleBackground from '../common/ParticleBackground'
@@ -18,6 +18,7 @@ export default function ChatLayout() {
   } = useChatStore()
 
   const isAdmin = useAuthStore((s) => s.isAdmin)
+  const logout = useAuthStore((s) => s.logout)
 
   const [collapsed, setCollapsed] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -189,14 +190,33 @@ export default function ChatLayout() {
             onClick={() => setCollapsed(!collapsed)}
             style={{ color: '#ccc' }}
           />
-          {isAdmin && (
+          {isAdmin ? (
+            <div style={{ display: 'flex', gap: 12 }}>
+              <Button
+                type="link"
+                icon={<SettingOutlined />}
+                onClick={() => navigate('/admin')}
+                style={{ color: '#aac8ff' }}
+              >
+                管理后台
+              </Button>
+              <Button
+                type="link"
+                icon={<LogoutOutlined />}
+                onClick={() => logout()}
+                style={{ color: '#ff6b6b' }}
+              >
+                退出登录
+              </Button>
+            </div>
+          ) : (
             <Button
               type="link"
-              icon={<SettingOutlined />}
-              onClick={() => navigate('/admin')}
-              style={{ color: '#aac8ff' }}
+              icon={<LogoutOutlined />}
+              onClick={() => logout()}
+              style={{ color: '#ff6b6b' }}
             >
-              管理后台
+              退出登录
             </Button>
           )}
         </div>
