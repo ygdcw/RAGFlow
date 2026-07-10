@@ -10,6 +10,7 @@ import {
   StopOutlined, CheckCircleOutlined, BookOutlined,
   ReloadOutlined, EditOutlined, ToolOutlined, UploadOutlined,
   RocketOutlined, FolderOpenOutlined, LoadingOutlined,
+  EyeOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '../stores/useAuthStore'
 import { adminApi } from '../api/admin'
@@ -31,6 +32,8 @@ export default function AdminPage() {
   const [logs, setLogs] = useState<OperationLog[]>([])
   const [kbList, setKbList] = useState<AdminKnowledgeBase[]>([])
   const [docList, setDocList] = useState<AdminDocument[]>([])
+  const [docTotal, setDocTotal] = useState(0)
+  const [docPage, setDocPage] = useState(1)
   const [loading, setLoading] = useState(false)
 
   const [addUserOpen, setAddUserOpen] = useState(false)
@@ -57,6 +60,12 @@ export default function AdminPage() {
   const [selectedKBForManage, setSelectedKBForManage] = useState<string | null>(null)
   const [kbDocuments, setKbDocuments] = useState<AdminDocument[]>([])
   const [manageLoading, setManageLoading] = useState(false)
+  
+  const [managePage, setManagePage] = useState(1)
+  const [manageTotal, setManageTotal] = useState(0)
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
+  const [viewDocModalOpen, setViewDocModalOpen] = useState(false)
+  const [viewingDoc, setViewingDoc] = useState<{ id: string; content: string; filename: string } | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -65,15 +74,16 @@ export default function AdminPage() {
 
   useEffect(() => {
     loadData()
-    adminApi.getAllKnowledgeBases().then(setKbList).catch(() => {})
-    
+  }, [activeMenu])
+
+  useEffect(() => {
     request.get('/knowledge-bases/applied').then((res: any) => {
       if (res.id) {
         setAppliedKB(res.id)
         localStorage.setItem('appliedKB', JSON.stringify(res.id))
       }
     }).catch(() => {})
-  }, [activeMenu])
+  }, [])
 
   const loadData = async () => {
     setLoading(true)
@@ -89,7 +99,9 @@ export default function AdminPage() {
           setKbList(await adminApi.getAllKnowledgeBases())
           break
         case 'documents':
-          setDocList(await adminApi.getAllDocuments())
+          const docResult = await adminApi.getAllDocuments({ page: docPage, page_size: 10 })
+          setDocList(docResult.items)
+          setDocTotal(docResult.total)
           break
         case 'logs':
           setLogs(await adminApi.getOperationLogs())
@@ -240,17 +252,23 @@ export default function AdminPage() {
     }
   }
 
-  const handleOpenManageModal = async (kbId: string) => {
+  const handleOpenManageModal = async (kbId: string, page: number = 1) => {
     setSelectedKBForManage(kbId)
+    setManagePage(page)
     setManageLoading(true)
-    setManageModalOpen(true)
+    if (page === 1) {
+      setManageModalOpen(true)
+      setSelectedDocIds([])
+    }
     
     try {
-      const docs = await adminApi.getAllDocuments()
-      setKbDocuments(docs.filter(d => d.knowledge_base === kbId))
+      const result = await adminApi.getAllDocuments({ page, page_size: 10, knowledge_base: kbId })
+      setKbDocuments(result.items)
+      setManageTotal(result.total)
     } catch (err: any) {
       message.error(err.message)
       setKbDocuments([])
+      setManageTotal(0)
     } finally {
       setManageLoading(false)
     }
@@ -263,10 +281,49 @@ export default function AdminPage() {
       await adminApi.deleteDocument(docId)
       message.success('文档已删除')
       setKbDocuments(prev => prev.filter(d => d.id !== docId))
-      loadData()
+      setSelectedDocIds(prev => prev.filter(id => id !== docId))
+      setManageTotal(prev => Math.max(0, prev - 1))
     } catch (err: any) {
       message.error(err.message)
     }
+  }
+
+  const handleViewDoc = async (docId: string) => {
+    try {
+      const result = await adminApi.getDocumentContent(docId)
+      setViewingDoc({
+        id: result.id,
+        content: result.content,
+        filename: result.filename,
+      })
+      setViewDocModalOpen(true)
+    } catch (err: any) {
+      message.error(err.message)
+    }
+  }
+
+  const handleBatchDelete = () => {
+    if (selectedDocIds.length === 0) {
+      message.warning('请先选择要删除的文档')
+      return
+    }
+    
+    Modal.confirm({
+      title: '确认批量删除',
+      content: `确定要删除选中的 ${selectedDocIds.length} 个文档吗？此操作不可撤销。`,
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          const result = await adminApi.batchDeleteDocuments(selectedDocIds)
+          message.success(result.message)
+          setKbDocuments(prev => prev.filter(d => !selectedDocIds.includes(d.id)))
+          setSelectedDocIds([])
+          setManageTotal(prev => Math.max(0, prev - selectedDocIds.length))
+        } catch (err: any) {
+          message.error(err.message)
+        }
+      },
+    })
   }
 
   const handleReparse = async (docId: string) => {
@@ -326,7 +383,7 @@ export default function AdminPage() {
           { key: 'users', title: '总用户数', value: stats?.total_users, icon: <UserOutlined /> },
           { key: 'docs', title: '文档总数', value: stats?.total_documents, icon: <FileTextOutlined /> },
           { key: 'questions', title: '总提问数', value: stats?.total_questions, icon: null },
-          { key: 'time', title: '平均响应时间', value: stats?.avg_response_time, suffix: '秒', precision: 1, icon: null },
+          { key: 'time', title: '平均响应时间', value: stats?.total_questions && stats.total_questions > 0 ? stats?.avg_response_time : '-', suffix: stats?.total_questions && stats.total_questions > 0 ? '秒' : '', precision: stats?.total_questions && stats.total_questions > 0 ? 1 : undefined, icon: null },
         ].map((item) => (
           <Col span={6} key={item.key}>
             <Card style={cardStyle(item.key)}
@@ -497,8 +554,21 @@ export default function AdminPage() {
         open={manageModalOpen}
         onCancel={() => setManageModalOpen(false)}
         footer={null}
-        width={600}
+        width={700}
       >
+        {kbDocuments.length > 0 && (
+          <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'flex-end' }}>
+            <Button
+              danger
+              size="small"
+              icon={<DeleteOutlined />}
+              onClick={handleBatchDelete}
+              disabled={selectedDocIds.length === 0}
+            >
+              批量删除 ({selectedDocIds.length})
+            </Button>
+          </div>
+        )}
         <Spin spinning={manageLoading}>
           {kbDocuments.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 40, color: '#888' }}>
@@ -509,7 +579,18 @@ export default function AdminPage() {
             <Table
               dataSource={kbDocuments}
               rowKey="id"
-              pagination={false}
+              rowSelection={{
+                selectedRowKeys: selectedDocIds,
+                onChange: (keys) => setSelectedDocIds(keys as string[]),
+              }}
+              pagination={{
+                current: managePage,
+                total: manageTotal,
+                pageSize: 10,
+                showSizeChanger: false,
+                showTotal: (total) => `共 ${total} 条`,
+                onChange: (page) => selectedKBForManage && handleOpenManageModal(selectedKBForManage, page),
+              }}
               columns={[
                 {
                   title: '文件名',
@@ -545,19 +626,38 @@ export default function AdminPage() {
                 {
                   title: '操作',
                   render: (_: any, r: AdminDocument) => (
-                    <Popconfirm
-                      title="确定删除此文档？"
-                      onConfirm={() => handleDeleteDocFromKB(r.id)}
-                      okButtonProps={{ danger: true }}
-                    >
-                      <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
-                    </Popconfirm>
+                    <Space>
+                      <Button size="small" icon={<EyeOutlined />} onClick={() => handleViewDoc(r.id)}>查看</Button>
+                      <Popconfirm
+                        title="确定删除此文档？"
+                        onConfirm={() => handleDeleteDocFromKB(r.id)}
+                        okButtonProps={{ danger: true }}
+                      >
+                        <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
+                      </Popconfirm>
+                    </Space>
                   ),
                 },
               ]}
             />
           )}
         </Spin>
+      </Modal>
+
+      <Modal
+        title={`查看文档 - ${viewingDoc?.filename || ''}`}
+        open={viewDocModalOpen}
+        onCancel={() => setViewDocModalOpen(false)}
+        footer={null}
+        width={700}
+      >
+        {viewingDoc && (
+          <div style={{ maxHeight: 500, overflow: 'auto', padding: 16 }}>
+            <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: '#e0e0e0', fontFamily: 'inherit' }}>
+              {viewingDoc.content}
+            </pre>
+          </div>
+        )}
       </Modal>
     </div>
   )
@@ -572,6 +672,14 @@ export default function AdminPage() {
         </Space>
       </div>
       <Table dataSource={docList} rowKey="id" loading={loading}
+        pagination={{
+          current: docPage,
+          total: docTotal,
+          pageSize: 10,
+          showSizeChanger: false,
+          showTotal: (total) => `共 ${total} 条`,
+          onChange: (page) => { setDocPage(page); loadData() },
+        }}
         columns={[
           { title: '文件名', dataIndex: 'filename', render: (n: string) => <Space><FileTextOutlined style={{ color: '#667eea' }} /><span style={{ color: '#e0e0e0' }}>{n}</span></Space> },
           { title: '所属知识库', dataIndex: 'knowledge_base' },

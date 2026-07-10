@@ -58,12 +58,35 @@ def _parse_pdf_ocr(file_path: str) -> list[Document]:
 
 
 def _parse_docx(file_path: str) -> list[Document]:
-    """解析 .docx 文件，所有段落合并成一个 Document"""
+    """解析 .docx 文件，按段落组分割成多个 Document"""
     doc = DocxDocument(file_path)
-    full_text = []
+    docs = []
+    current_text = []
+    current_size = 0
+    max_size = 50000
+    
     for para in doc.paragraphs:
-        full_text.append(para.text)
-    return [Document(page_content="\n".join(full_text), metadata={"source": file_path, "file_type": "docx"})]
+        para_text = para.text + "\n"
+        para_size = len(para_text)
+        
+        if current_size + para_size > max_size and current_text:
+            docs.append(Document(
+                page_content="".join(current_text),
+                metadata={"source": file_path, "file_type": "docx", "part": len(docs) + 1}
+            ))
+            current_text = []
+            current_size = 0
+        
+        current_text.append(para_text)
+        current_size += para_size
+    
+    if current_text:
+        docs.append(Document(
+            page_content="".join(current_text),
+            metadata={"source": file_path, "file_type": "docx", "part": len(docs) + 1}
+        ))
+    
+    return docs
 
 
 def _parse_pptx(file_path: str) -> list[Document]:

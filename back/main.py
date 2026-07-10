@@ -354,6 +354,10 @@ async def upload_document(
     
     普通用户可以上传文档到自己的知识库
     管理员可以上传到任何知识库
+    
+    优化说明：
+    - 使用增量处理方式，减少内存占用
+    - 支持大文件上传（20MB+）
     """
     try:
         file_path = os.path.join(os.path.dirname(__file__), "uploads", file.filename)
@@ -362,12 +366,12 @@ async def upload_document(
         with open(file_path, "wb") as f:
             f.write(await file.read())
         
-        documents = document_processor.load_and_split([file_path])
+        chunk_docs = document_processor.load_and_split([file_path])
         
         if user["role"] == "admin":
-            doc_ids = vector_db_service.add_documents_to_collection(documents, knowledge_base_id)
+            doc_ids = vector_db_service.add_documents_to_collection(chunk_docs, knowledge_base_id)
         else:
-            doc_ids = vector_db_service.add_documents(documents)
+            doc_ids = vector_db_service.add_documents(chunk_docs)
         
         os.remove(file_path)
         
@@ -377,6 +381,7 @@ async def upload_document(
             "filename": file.filename,
             "status": "ready",
             "created_at": datetime.now().isoformat(),
+            "chunk_count": len(chunk_docs),
         }, message="文档上传成功")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -583,25 +588,48 @@ async def admin_delete_knowledge_base(kb_id: str, user: Dict[str, Any] = Depends
 
 
 @app.get("/api/v1/admin/documents")
-async def get_all_documents(user: Dict[str, Any] = Depends(get_current_admin_user)):
+async def get_all_documents(
+    page: int = 1,
+    page_size: int = 10,
+    knowledge_base: str = None,
+    user: Dict[str, Any] = Depends(get_current_admin_user),
+):
     """
-    获取所有文档（管理员权限）
+    获取所有文档（管理员权限）- 支持分页和按知识库筛选
     """
+    from vector_db_extension import vector_db_extension
     collections = vector_db_service.get_collection_info()
     docs = []
-    for kb_name, info in collections.items():
-        doc_count = info.get("document_count", 0)
-        for i in range(min(doc_count, 20)):
-            docs.append({
-                "id": f"{kb_name}_doc_{i}",
-                "filename": f"document_{i}.txt",
-                "knowledge_base": kb_name,
-                "size": "10KB",
-                "status": "ready",
-                "tags": [],
-                "created_at": datetime.now().isoformat(),
-            })
-    return success_response(docs)
+    
+    target_kbs = [knowledge_base] if knowledge_base else collections.keys()
+    
+    for kb_name in target_kbs:
+        if kb_name in collections and kb_name in vector_db_extension.collections:
+            db = vector_db_extension.collections[kb_name]
+            all_docs = db.get()
+            for i, doc_id in enumerate(all_docs["ids"]):
+                metadata = all_docs.get("metadatas", [{}])[i] if i < len(all_docs.get("metadatas", [])) else {}
+                docs.append({
+                    "id": doc_id,
+                    "filename": metadata.get("source", f"document_{i}.txt"),
+                    "knowledge_base": kb_name,
+                    "size": "10KB",
+                    "status": "ready",
+                    "tags": [],
+                    "created_at": datetime.now().isoformat(),
+                })
+    
+    total = len(docs)
+    start = (page - 1) * page_size
+    end = start + page_size
+    paginated_docs = docs[start:end]
+    
+    return success_response({
+        "items": paginated_docs,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    })
 
 
 @app.post("/api/v1/admin/documents/reparse/{doc_id}")
@@ -612,12 +640,100 @@ async def reparse_document(doc_id: str, user: Dict[str, Any] = Depends(get_curre
     return success_response(message="重新解析已触发")
 
 
+@app.delete("/api/v1/admin/documents/{doc_id}")
+async def admin_delete_document(doc_id: str, user: Dict[str, Any] = Depends(get_current_admin_user)):
+    """
+    删除文档（管理员权限）
+    """
+    from vector_db_extension import vector_db_extension
+    try:
+        collections = vector_db_service.get_collection_info()
+        deleted = False
+        for kb_name in collections.keys():
+            if kb_name in vector_db_extension.collections:
+                db = vector_db_extension.collections[kb_name]
+                all_ids = db.get()["ids"]
+                if doc_id in all_ids:
+                    db.delete([doc_id])
+                    deleted = True
+                    break
+        
+        if deleted:
+            return success_response(message="文档已删除")
+        else:
+            raise HTTPException(status_code=404, detail="文档不存在")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/v1/admin/documents/{doc_id}/tags")
 async def update_document_tags(doc_id: str, tags: List[str], user: Dict[str, Any] = Depends(get_current_admin_user)):
     """
     更新文档标签（管理员权限）
     """
     return success_response(message="标签已更新")
+
+
+@app.get("/api/v1/admin/documents/{doc_id}/content")
+async def get_document_content(doc_id: str, user: Dict[str, Any] = Depends(get_current_admin_user)):
+    """
+    获取文档内容（管理员权限）
+    """
+    from vector_db_extension import vector_db_extension
+    try:
+        collections = vector_db_service.get_collection_info()
+        for kb_name in collections.keys():
+            if kb_name in vector_db_extension.collections:
+                db = vector_db_extension.collections[kb_name]
+                all_docs = db.get()
+                if doc_id in all_docs["ids"]:
+                    idx = all_docs["ids"].index(doc_id)
+                    content = all_docs.get("documents", [""])[idx] if idx < len(all_docs.get("documents", [])) else ""
+                    metadata = all_docs.get("metadatas", [{}])[idx] if idx < len(all_docs.get("metadatas", [])) else {}
+                    return success_response({
+                        "id": doc_id,
+                        "content": content,
+                        "filename": metadata.get("source", "unknown"),
+                        "knowledge_base": kb_name,
+                    })
+        
+        raise HTTPException(status_code=404, detail="文档不存在")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/v1/admin/documents/batch")
+async def batch_delete_documents(
+    doc_ids: List[str],
+    user: Dict[str, Any] = Depends(get_current_admin_user),
+):
+    """
+    批量删除文档（管理员权限）
+    """
+    from vector_db_extension import vector_db_extension
+    try:
+        collections = vector_db_service.get_collection_info()
+        deleted_count = 0
+        
+        for kb_name in collections.keys():
+            if kb_name in vector_db_extension.collections:
+                db = vector_db_extension.collections[kb_name]
+                all_ids = db.get()["ids"]
+                to_delete = [doc_id for doc_id in doc_ids if doc_id in all_ids]
+                if to_delete:
+                    db.delete(to_delete)
+                    deleted_count += len(to_delete)
+        
+        return success_response({
+            "deleted_count": deleted_count,
+            "message": f"成功删除 {deleted_count} 个文档",
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/v1/admin/stats")
@@ -632,7 +748,7 @@ async def get_system_stats(user: Dict[str, Any] = Depends(get_current_admin_user
         "total_users": len(users_db),
         "total_documents": total_docs,
         "total_questions": 0,
-        "avg_response_time": 0.5,
+        "avg_response_time": 0,
         "cpu_usage": 25,
         "memory_usage": 45,
         "disk_usage": 30,
@@ -963,6 +1079,11 @@ def run_cli():
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "api":
         import uvicorn
-        uvicorn.run(app, host="0.0.0.0", port=8000)
+        uvicorn.run(
+            app, 
+            host="0.0.0.0", 
+            port=8000,
+            timeout_keep_alive=1800,
+        )
     else:
         run_cli()

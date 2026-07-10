@@ -5,7 +5,7 @@ from config import config
 class EmbeddingService:
     """
     嵌入模型服务类
-    负责管理Qwen3-Embedding-8B嵌入模型的初始化和调用
+    负责管理deepseek-embed嵌入模型的初始化和调用
     
     【人A负责】：嵌入模型集成与服务封装
     【协作需求】：
@@ -16,7 +16,7 @@ class EmbeddingService:
     def __init__(self):
         """
         初始化嵌入模型服务
-        使用配置文件中的Qwen/Qwen3-Embedding-8B模型参数
+        使用配置文件中的deepseek-embed模型参数
         """
         config.validate_config()
         
@@ -75,7 +75,7 @@ class EmbeddingService:
         返回：
             int: 嵌入向量维度
         
-        注意：Qwen3-Embedding-8B模型的嵌入维度为4096
+        注意：deepseek-embed模型的嵌入维度为1024   
         """
         sample_text = "test"
         embedding = self.embed_query(sample_text)

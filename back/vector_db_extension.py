@@ -313,10 +313,11 @@ class VectorDBExtension:
             for category, name in config.VECTOR_DB_COLLECTIONS.items():
                 if name in self.collections:
                     db = self.collections[name]
+                    metadata = self.collection_metadata.get(name, {})
                     info[name] = {
                         "category": category,
                         "document_count": len(db.get()["ids"]),
-                        **(self.collection_metadata.get(name, {})),
+                        "description": metadata.get("description", ""),
                     }
             
             # 再处理动态创建的集合（不在配置文件中但在self.collections中）
@@ -327,7 +328,7 @@ class VectorDBExtension:
                     info[name] = {
                         "category": metadata.get("category", name),
                         "document_count": len(db.get()["ids"]),
-                        **metadata,
+                        "description": metadata.get("description", ""),
                     }
             
             return info

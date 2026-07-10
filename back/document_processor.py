@@ -4,7 +4,7 @@ from config import config
 
 # 【人B整合】导入人B实现的文档解析器和文本分割器
 from retrieval_engine.parser import parse_document
-from retrieval_engine.text_splitter import get_splitter, split_documents as b_split_documents
+from retrieval_engine.text_splitter import get_splitter, split_documents as b_split_documents, split_text_incrementally
 
 
 class DocumentProcessor:
@@ -157,6 +157,44 @@ class DocumentProcessor:
             return split_docs
         except Exception as e:
             raise RuntimeError(f"分割文档失败: {str(e)}") from e
+
+    def load_and_split_incremental(self, file_paths, chunk_size=None, chunk_overlap=None):
+        """
+        增量加载和分割文档，返回生成器，减少内存占用
+        
+        参数：
+            file_paths (list[str]): 文件路径列表
+            chunk_size (int, optional): 块大小，默认使用配置值
+            chunk_overlap (int, optional): 重叠大小，默认使用配置值
+        
+        返回：
+            Iterator[Document]: 分割后的Document对象迭代器
+        
+        使用场景：处理大型文档时，避免一次性加载所有内容到内存
+        """
+        target_chunk_size = chunk_size or config.DOCUMENT_CHUNK_SIZE
+        target_chunk_overlap = chunk_overlap or config.DOCUMENT_CHUNK_OVERLAP
+        
+        for file_path in file_paths:
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"文件不存在: {file_path}")
+            
+            try:
+                docs = parse_document(file_path)
+                for doc in docs:
+                    for chunk_text in split_text_incrementally(
+                        doc.page_content, 
+                        chunk_size=target_chunk_size, 
+                        chunk_overlap=target_chunk_overlap
+                    ):
+                        yield Document(
+                            page_content=chunk_text,
+                            metadata=doc.metadata.copy()
+                        )
+            except ValueError as e:
+                raise ValueError(f"不支持的文件格式: {file_path}") from e
+            except Exception as e:
+                raise RuntimeError(f"处理文件 {file_path} 失败: {str(e)}") from e
 
 
 document_processor = DocumentProcessor()

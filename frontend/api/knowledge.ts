@@ -1,4 +1,4 @@
-import request from './request'
+import request, { uploadRequest } from './request'
 
 export const knowledgeApi = {
   // 获取知识库列表
@@ -17,15 +17,12 @@ export const knowledgeApi = {
   getDocuments: (kbId: string): Promise<PaginatedData<Document>> =>
     request.get(`/knowledge-bases/${kbId}/documents`),
 
-  // 上传文档
+  // 上传文档（支持大文件，超时时间10分钟）
   upload: (kbId: string, file: File) => {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('knowledge_base_id', kbId)
-    return request.post('/documents/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 60000,
-    })
+    return uploadRequest.post('/documents/upload', formData)
   },
 
   // 删除文档

@@ -1,4 +1,4 @@
-import request from './request'
+import request, { uploadRequest } from './request'
 
 export const adminApi = {
   // 用户管理
@@ -30,8 +30,8 @@ export const adminApi = {
     request.delete(`/admin/knowledge-bases/${kbId}`),
 
     // 文档管理
-  getAllDocuments: (): Promise<AdminDocument[]> =>
-    request.get('/admin/documents'),
+  getAllDocuments: (params?: { page?: number; page_size?: number; knowledge_base?: string }): Promise<{ items: AdminDocument[]; total: number; page: number; page_size: number }> =>
+    request.get('/admin/documents', { params }),
 
   deleteDocument: (docId: string): Promise<void> =>
     request.delete(`/admin/documents/${docId}`),
@@ -42,13 +42,16 @@ export const adminApi = {
   updateDocumentTags: (docId: string, tags: string[]): Promise<void> =>
     request.put(`/admin/documents/${docId}/tags`, { tags }),
 
+  getDocumentContent: (docId: string): Promise<{ id: string; content: string; filename: string; knowledge_base: string }> =>
+    request.get(`/admin/documents/${docId}/content`),
+
+  batchDeleteDocuments: (docIds: string[]): Promise<{ deleted_count: number; message: string }> =>
+    request.delete('/admin/documents/batch', { data: docIds }),
+
   createKnowledgeBase: (name: string): Promise<void> =>
   request.post('/admin/knowledge-bases', null, { params: { name } }),
 
 uploadDocument: (formData: FormData): Promise<void> =>
-  request.post('/documents/upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-    timeout: 60000,
-  }),
+  uploadRequest.post('/documents/upload', formData),
 }
 

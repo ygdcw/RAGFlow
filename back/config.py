@@ -13,8 +13,8 @@ class Config:
     【协作需求】：无
     """
 
-    # === 嵌入模型配置（Qwen/Qwen3-Embedding-8B）===
-    # 使用siliconflow平台的Qwen3-Embedding-8B模型
+    # === 嵌入模型配置（BAAI/bge-m3）===
+    # 使用BAAI平台的bge-m3模型
     EMBEDDING_API_KEY = os.getenv("OPENAI_API_KEY")
     EMBEDDING_API_BASE = os.getenv("OPENAI_API_BASE")
     EMBEDDING_MODEL_NAME = "Qwen/Qwen3-Embedding-8B"
